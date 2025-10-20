@@ -1,0 +1,30 @@
+services:
+  # Backend API
+  - type: web
+    name: lyrics-to-slides-api
+    runtime: python
+    buildCommand: "pip install -r requirements.txt && playwright install chromium"
+    startCommand: "cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: XAI_API_KEY
+        sync: false  # Set this manually in Render dashboard
+      - key: GOOGLE_API_KEY
+        sync: false  # Set this manually in Render dashboard
+      - key: GOOGLE_SEARCH_ENGINE_ID
+        sync: false  # Set this manually in Render dashboard
+
+  # Frontend (static site)
+  - type: web
+    name: lyrics-to-slides-frontend
+    runtime: static
+    buildCommand: "npm install && npm run build"
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_VERSION
+        value: 18.0.0
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://lyrics-to-slides-api.onrender.com/api/*
