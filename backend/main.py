@@ -6,9 +6,9 @@ from typing import List, Optional
 import os
 from dotenv import load_dotenv
 
-from search_service import search_lyrics
-from lyrics_service import extract_lyrics
-from pptx_service import create_presentation
+from backend.search_service import search_lyrics
+from backend.lyrics_service import extract_lyrics
+from backend.pptx_service import create_presentation
 
 load_dotenv()
 
@@ -34,6 +34,18 @@ class SearchResult(BaseModel):
 class GenerateRequest(BaseModel):
     urls: List[str]
     lines_per_slide: int
+    # Optional: pre-extracted lyrics from validation step
+    validated_songs: Optional[List[dict]] = None
+
+class ExtractLyricsRequest(BaseModel):
+    urls: List[str]
+
+class LyricsExtractionResult(BaseModel):
+    url: str
+    success: bool
+    title: Optional[str] = None
+    lyrics: Optional[str] = None
+    error: Optional[str] = None
 
 @app.get("/")
 async def root():
@@ -48,6 +60,51 @@ async def search_song(request: SearchRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/extract-lyrics", response_model=List[LyricsExtractionResult])
+async def extract_lyrics_batch(request: ExtractLyricsRequest):
+    """Extract lyrics from multiple URLs and return status for each"""
+    results = []
+
+    for url in request.urls:
+        try:
+            grok_response = await extract_lyrics(url)
+
+            # Check if lyrics were found
+            if not grok_response or grok_response == "NO_LYRICS_FOUND":
+                results.append(LyricsExtractionResult(
+                    url=url,
+                    success=False,
+                    error="No lyrics found on this page"
+                ))
+                continue
+
+            # Parse title and lyrics from response
+            song_name, lyrics = parse_grok_response(grok_response)
+
+            # Check if we got valid lyrics
+            if lyrics and len(lyrics) > 50:
+                results.append(LyricsExtractionResult(
+                    url=url,
+                    success=True,
+                    title=song_name,
+                    lyrics=lyrics
+                ))
+            else:
+                results.append(LyricsExtractionResult(
+                    url=url,
+                    success=False,
+                    error="Extracted content too short or invalid"
+                ))
+
+        except Exception as e:
+            results.append(LyricsExtractionResult(
+                url=url,
+                success=False,
+                error=str(e)
+            ))
+
+    return results
+
 @app.post("/api/generate")
 async def generate_presentation(request: GenerateRequest, background_tasks: BackgroundTasks):
     """Generate PowerPoint presentation from lyrics"""
@@ -56,18 +113,28 @@ async def generate_presentation(request: GenerateRequest, background_tasks: Back
         all_lyrics = []
         song_names = []
 
-        # Extract lyrics from each URL (includes title from Grok)
-        for url in request.urls:
-            grok_response = await extract_lyrics(url)
+        # If we have pre-validated songs, use them
+        if request.validated_songs:
+            for song in request.validated_songs:
+                all_lyrics.append(song['lyrics'])
+                song_names.append(song['title'])
+        else:
+            # Extract lyrics from each URL (includes title from Grok)
+            for url in request.urls:
+                grok_response = await extract_lyrics(url)
 
-            if not grok_response:
-                raise HTTPException(status_code=400, detail=f"Could not extract lyrics from URL: {url}")
+                if not grok_response or grok_response == "NO_LYRICS_FOUND":
+                    # Skip songs with no lyrics instead of failing
+                    continue
 
-            # Parse title and lyrics from Grok's response
-            song_name, lyrics = parse_grok_response(grok_response)
+                # Parse title and lyrics from Grok's response
+                song_name, lyrics = parse_grok_response(grok_response)
 
-            all_lyrics.append(lyrics)
-            song_names.append(song_name)
+                all_lyrics.append(lyrics)
+                song_names.append(song_name)
+
+        if not all_lyrics:
+            raise HTTPException(status_code=400, detail="No valid lyrics found for any songs")
 
         # Generate PPTX with all songs
         filename = create_presentation(all_lyrics, song_names, request.lines_per_slide)
