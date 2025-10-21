@@ -172,6 +172,11 @@ def parse_grok_response(grok_response: str) -> tuple[str, str]:
                 if len(title_and_rest) > 1:
                     title = title_and_rest[0].strip()
                     lyrics = title_and_rest[1].strip()
+
+                    # Remove " by UNKNOWN ARTIST" if present (case-insensitive)
+                    if title.upper().endswith(" BY UNKNOWN ARTIST"):
+                        title = title[:title.upper().rfind(" BY UNKNOWN ARTIST")].strip()
+
                     return title, lyrics
 
         # Fallback: treat entire response as lyrics, use generic title
