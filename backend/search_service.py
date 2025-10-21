@@ -2,9 +2,9 @@ import requests
 import os
 from typing import List, Dict
 
-# Load from environment variables (with fallback defaults for local dev)
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "AIzaSyBc6qpvL3qAsDJOcpl2ftTA52B06QuLFYk")
-SEARCH_ENGINE_ID = os.getenv("GOOGLE_SEARCH_ENGINE_ID", "002184662638918202104:kilqn8tgk9s")
+# Load from environment variables
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+SEARCH_ENGINE_ID = os.getenv("GOOGLE_SEARCH_ENGINE_ID")
 
 async def search_lyrics(song_name: str) -> List[Dict[str, str]]:
     """

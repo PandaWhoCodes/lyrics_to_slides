@@ -6,11 +6,12 @@ from typing import List, Optional
 import os
 from dotenv import load_dotenv
 
+# Load environment variables BEFORE importing other modules
+load_dotenv()
+
 from backend.search_service import search_lyrics
 from backend.lyrics_service import extract_lyrics
 from backend.pptx_service import create_presentation
-
-load_dotenv()
 
 app = FastAPI()
 
