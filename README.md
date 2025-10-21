@@ -2,6 +2,10 @@
 
 An AI-powered web app that converts song lyrics into beautiful PowerPoint presentations. Uses Grok AI for intelligent lyrics extraction and grouping by verse/chorus structure.
 
+## 🎥 Demo Video
+
+Watch the app in action: [Demo Video](https://drive.google.com/file/d/1Q62mHQlNHw-YvQxKk0YLRSWcywXLeTkC/view?usp=sharing)
+
 ## ✨ Features
 
 - 🎨 **Sleek Apple-inspired UI** - Clean, modern design
