@@ -121,6 +121,7 @@ Line 2 of verse 2
 RULES:
 1. First line MUST be exactly "---TITLE---"
 2. Second line is the song title with artist (e.g., "Thunder by Imagine Dragons")
+   - If artist is unknown, just use the song title without " by UNKNOWN ARTIST"
 3. Third line MUST be exactly "---LYRICS---"
 4. Then the grouped lyrics with "---SLIDE---" between sections
 5. Group by natural song structure (verses, choruses, bridges)

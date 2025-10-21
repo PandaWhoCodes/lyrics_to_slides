@@ -6,11 +6,12 @@ from typing import List, Optional
 import os
 from dotenv import load_dotenv
 
+# Load environment variables BEFORE importing other modules
+load_dotenv()
+
 from backend.search_service import search_lyrics
 from backend.lyrics_service import extract_lyrics
 from backend.pptx_service import create_presentation
-
-load_dotenv()
 
 app = FastAPI()
 
@@ -172,6 +173,11 @@ def parse_grok_response(grok_response: str) -> tuple[str, str]:
                 if len(title_and_rest) > 1:
                     title = title_and_rest[0].strip()
                     lyrics = title_and_rest[1].strip()
+
+                    # Remove " by UNKNOWN ARTIST" if present (case-insensitive)
+                    if title.upper().endswith(" BY UNKNOWN ARTIST"):
+                        title = title[:title.upper().rfind(" BY UNKNOWN ARTIST")].strip()
+
                     return title, lyrics
 
         # Fallback: treat entire response as lyrics, use generic title
