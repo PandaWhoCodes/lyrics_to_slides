@@ -42,16 +42,16 @@ def create_church_presentation_v3(lyrics_list, song_names, lines_per_slide=4):
     # Update date on first slide
     print("Updating date on title slide...")
     date_str = datetime.now().strftime("%d %b'%y")
+
     for shape in prs.slides[0].shapes:
         if shape.has_text_frame:
             text = shape.text_frame.text
+            # Look for date pattern with apostrophe or month names
             if "'" in text or any(month in text for month in ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']):
-                for paragraph in shape.text_frame.paragraphs:
-                    for run in paragraph.runs:
-                        if "'" in run.text or any(month in run.text for month in ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']):
-                            run.text = date_str
-                            print(f"  Updated date to: {date_str}")
-                            break
+                # Replace the entire text frame to avoid duplication
+                shape.text_frame.text = date_str
+                print(f"  Updated date to: {date_str}")
+                break
 
     print()
     print("Creating lyrics slides...")
