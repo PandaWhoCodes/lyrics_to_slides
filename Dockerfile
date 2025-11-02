@@ -60,7 +60,7 @@ RUN playwright install chromium --with-deps || playwright install chromium \
 
 # Copy backend code
 COPY backend/ ./backend/
-COPY reference_template.pptx ./backend/
+COPY reference_template.pptx ./
 
 # Copy frontend build from builder stage (only dist folder)
 COPY --from=frontend-builder /app/dist ./dist
