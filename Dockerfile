@@ -60,7 +60,7 @@ RUN playwright install chromium --with-deps || playwright install chromium \
 
 # Copy backend code
 COPY backend/ ./backend/
-COPY reference_template.pptx ./
+COPY reference_template.pptx ./backend/
 
 # Copy frontend build from builder stage (only dist folder)
 COPY --from=frontend-builder /app/dist ./dist
@@ -73,6 +73,9 @@ RUN find /usr/local/lib/python3.11 -type d -name tests -exec rm -rf {} + 2>/dev/
     && find /usr/local/lib/python3.11 -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true \
     && rm -rf /tmp/* /var/tmp/*
 
+# Change working directory to backend
+WORKDIR /app/backend
+
 # Expose port
 EXPOSE 8080
 
@@ -84,5 +87,5 @@ ENV PYTHONUNBUFFERED=1 \
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD python -c "import requests; requests.get('http://localhost:8080/health')"
 
-# Start the application
-CMD ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Start the application (now running from /app/backend directory like start.sh)
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
