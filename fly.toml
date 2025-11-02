@@ -26,9 +26,9 @@ primary_region = "lax"  # Los Angeles - change to region closest to you
     path = "/health"
 
 [vm]
+  memory = "2gb"
   cpu_kind = "shared"
   cpus = 2
-  memory_gb = 2
 
 [[mounts]]
   source = "lyrics_data"
