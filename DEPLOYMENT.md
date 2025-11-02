@@ -1,198 +1,150 @@
-# Deployment Checklist for Render
+# Deployment Guide
 
-## Before Deploying
+## Fly.io Deployment
 
-- [x] Remove unused service account keys
-- [x] Update .gitignore for production
-- [x] Create render.yaml configuration
-- [x] Update README with deployment instructions
+### Prerequisites
 
-## Deployment Steps
+1. Install Fly.io CLI:
+```bash
+curl -L https://fly.io/install.sh | sh
+```
 
-### 1. Prepare Repository
+2. Sign up and login:
+```bash
+fly auth signup  # or fly auth login
+```
+
+### First Time Deployment
+
+1. **Clone the repository**:
+```bash
+git clone <your-repo-url>
+cd lyrics_to_slides
+```
+
+2. **Launch the app** (creates app on Fly.io):
+```bash
+fly launch --no-deploy
+```
+- Choose your app name (or use default: `lyrics-to-slides`)
+- Choose your region (closest to your users)
+- Don't deploy yet - we need to set secrets first
+
+3. **Set environment variables**:
+```bash
+fly secrets set XAI_API_KEY="your_xai_api_key_here"
+fly secrets set GOOGLE_API_KEY="your_google_api_key_here"
+fly secrets set GOOGLE_SEARCH_ENGINE_ID="your_search_engine_id_here"
+```
+
+4. **Create persistent volume** (for temporary file storage):
+```bash
+fly volumes create lyrics_data --size 1 --region <your-region>
+```
+
+5. **Deploy the application**:
+```bash
+fly deploy
+```
+
+6. **Open your app**:
+```bash
+fly open
+```
+
+### Updating the App
+
+After making changes:
 
 ```bash
-# Check current status
-git status
-
-# Add all changes
-git add .
-
-# Commit
-git commit -m "feat: prepare for Render deployment"
-
-# Push to GitHub
-git push origin main
+git pull  # or make your changes
+fly deploy
 ```
 
-### 2. Create Render Account
+### Monitoring
 
-1. Go to https://render.com
-2. Sign up with GitHub
-3. Authorize Render to access your repositories
+- **View logs**: `fly logs`
+- **Check status**: `fly status`
+- **Scale resources**: `fly scale memory 4096` (if needed)
+- **SSH into machine**: `fly ssh console`
 
-### 3. Deploy via Blueprint
+### Configuration
 
-1. Click **"New +"** → **"Blueprint"**
-2. Connect your `lyrics_to_slides` repository
-3. Render will auto-detect `render.yaml`
-4. Review the services:
-   - `lyrics-to-slides-api` (Backend)
-   - `lyrics-to-slides-frontend` (Frontend)
-5. Click **"Apply"** to deploy both services
+The app is configured in fly.toml:
 
-### 4. Configure Environment Variables
+- **Region**: Set in `primary_region` (e.g., "lax", "iad", "fra")
+- **Resources**: 2 CPUs, 2GB RAM (adjustable in `[vm]` section)
+- **Auto-scaling**: Machines auto-stop when idle, restart on request
+- **Health checks**: HTTP GET to `/health` every 10s
 
-**Backend Service:**
-1. Go to Dashboard → `lyrics-to-slides-api`
-2. Navigate to "Environment" tab
-3. Add secret environment variable:
-   - Key: `XAI_API_KEY`
-   - Value: `your-xai-api-key-here` (get from your xAI dashboard)
-4. Click "Save Changes"
-5. Wait for automatic redeploy
+### Cost Estimate
 
-**Frontend Service:**
-1. Go to Dashboard → `lyrics-to-slides-frontend`
-2. Navigate to "Environment" tab
-3. Add environment variable:
-   - Key: `VITE_API_URL`
-   - Value: `https://lyrics-to-slides-api.onrender.com` (use your actual backend URL)
-4. Click "Save Changes"
-5. Trigger manual deploy
+- **Free tier**: Includes 3 shared-cpu-1x machines with 256MB RAM
+- **This app**: Uses 2 CPUs + 2GB RAM = ~$10-15/month
+- **Auto-stop**: Reduces costs when not in use (billed by running time)
 
-### 5. Verify Deployment
+### Troubleshooting
 
-1. **Backend Health Check:**
-   - Visit: `https://your-api.onrender.com/`
-   - Should return: `{"message": "Lyrics to Slides API"}`
-
-2. **Frontend:**
-   - Visit: `https://your-frontend.onrender.com/`
-   - Should load the UI
-
-3. **Test Full Flow:**
-   - Enter a song name
-   - Click search
-   - Select result
-   - Generate presentation
-   - Download should work
-
-## Post-Deployment
-
-### Monitor Logs
-
-**Backend Logs:**
-```
-Dashboard → lyrics-to-slides-api → Logs
-```
-Watch for:
-- Playwright installation success
-- API requests
-- Any errors
-
-**Frontend Logs:**
-```
-Dashboard → lyrics-to-slides-frontend → Logs
-```
-Watch for:
-- Build success
-- Static file serving
-
-### Common Issues
-
-**Issue: Playwright browsers not found**
-- Solution: Ensure build command includes `playwright install chromium`
-- Check in render.yaml: `buildCommand: "pip install -r requirements.txt && playwright install chromium"`
-
-**Issue: CORS errors**
-- Solution: Update CORS origins in `backend/main.py`
-- Add your frontend URL to `allow_origins`
-
-**Issue: API calls fail**
-- Solution: Verify `VITE_API_URL` is set correctly in frontend
-- Check backend URL in Render dashboard
-
-**Issue: Grok API errors**
-- Solution: Verify `XAI_API_KEY` is set correctly
-- Check xAI API quota/limits
-
-## Performance Optimization
-
-### For Free Tier
-
-Render free tier services spin down after 15 minutes of inactivity:
-- First request after spin-down takes ~30 seconds
-- Subsequent requests are fast
-
-### Upgrade Considerations
-
-Consider upgrading if:
-- You need faster cold starts
-- You have high traffic
-- You need custom domains
-
-## Security Notes
-
-- API keys are stored as secret environment variables
-- Never commit API keys to git
-- `.gitignore` prevents accidental commits
-- Service account keys removed (not needed)
-
-## Maintenance
-
-### Update Deployment
-
+**Build fails - Playwright installation:**
 ```bash
-# Make changes locally
-git add .
-git commit -m "feat: your changes"
-git push origin main
-
-# Render auto-deploys on push
+# Check build logs
+fly logs
+# May need to increase build timeout or use larger builder
 ```
 
-### Manual Redeploy
-
-In Render Dashboard:
-1. Go to your service
-2. Click "Manual Deploy"
-3. Select branch
-4. Click "Deploy"
-
-## Monitoring
-
-### Check Service Status
-
+**App crashes on start:**
 ```bash
-# Backend health
-curl https://your-api.onrender.com/
-
-# Test search endpoint
-curl -X POST https://your-api.onrender.com/api/search \
-  -H "Content-Type: application/json" \
-  -d '{"song_name":"test"}'
+# Check if secrets are set
+fly secrets list
+# View detailed logs
+fly logs --tail
 ```
 
-### View Metrics
+**Out of memory:**
+```bash
+# Increase memory
+fly scale memory 4096
+```
 
-In Render Dashboard:
-- CPU usage
-- Memory usage
-- Request counts
-- Error rates
+**Slow cold starts:**
+```bash
+# Keep at least 1 machine running
+fly scale count 1
+```
 
-## Rollback
+### Alternative: Ubuntu VPS Deployment
 
-If deployment fails:
-1. Go to Render Dashboard
-2. Navigate to service
-3. Click "Deploys" tab
-4. Find previous working deploy
-5. Click "Rollback"
+If Fly.io costs are too high, you can deploy on a traditional VPS:
 
-## Support
+1. **Clone repo on server**:
+```bash
+git clone <your-repo-url>
+cd lyrics_to_slides
+```
 
-- Render Docs: https://render.com/docs
-- Render Community: https://community.render.com
-- GitHub Issues: Your repository issues page
+2. **Run installer**:
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+3. **Create .env file**:
+```bash
+nano .env
+# Add your API keys
+```
+
+4. **Start the app**:
+```bash
+./start.sh
+```
+
+5. **Optional: Set up as systemd service** for auto-restart.
+
+### Recommended VPS Providers
+
+- **DigitalOcean**: $6/month droplet
+- **Linode**: $5/month nanode
+- **Vultr**: $6/month instance
+- **AWS EC2**: t2.micro free tier (1 year)
+- **Hetzner**: €4.5/month CX11

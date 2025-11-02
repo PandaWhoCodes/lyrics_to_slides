@@ -1,41 +1,147 @@
-# Claude Context - Lyrics to Slides Project
+# Lyrics to Slides - System Documentation
 
 ## Project Overview
-A full-stack application that generates PowerPoint presentations from song lyrics fetched from the web.
+A full-stack application that generates PowerPoint presentations from song lyrics fetched from the web. Designed for church worship services with focus on speed, accuracy, and clean formatting.
 
 ## Architecture
 
-### Backend (Python/FastAPI)
-- **main.py**: API endpoints for search, extract lyrics, generate presentation
-- **search_service.py**: Google Custom Search integration
-- **lyrics_service.py**: Playwright-based web scraping + Grok AI for lyrics extraction
-- **pptx_service.py**: Orchestrates presentation generation
-- **church_template_v3.py**: Template-based PPTX generation (current working version)
+### Tech Stack
+- **Backend**: Python 3.x, FastAPI, asyncio
+- **Frontend**: React (Vite), Axios
+- **AI Services**: xAI Grok API (lyrics extraction & validation)
+- **Search**: Google Custom Search API
+- **Web Scraping**: Playwright (headless Chromium)
+- **Presentation**: python-pptx
 
-### Frontend (React)
-- Located in frontend directory
-- Running on port 5173
-- Communicates with backend API on port 8000
+### Directory Structure
+```
+lyrics_to_slides/
+├── backend/
+│   ├── main.py                    # FastAPI server & endpoints
+│   ├── search_service.py          # Google Custom Search integration
+│   ├── lyrics_service.py          # Web scraping + AI extraction
+│   ├── validation_service.py      # AI result validation
+│   ├── pptx_service.py            # Presentation orchestration
+│   └── church_template.py         # Template-based PPTX generation
+├── src/
+│   ├── App.jsx                    # React frontend
+│   └── App.css                    # Styling
+├── reference_template.pptx        # PowerPoint template (preserves formatting)
+├── .env                           # API keys (not in git)
+└── .claude/CLAUDE.md              # This file
+```
 
-## Recent Issues Solved ✅
+## System Workflow
 
-### 1. Template Slide Deletion (Fixed)
-**Problem**: Slide 3 (template) was remaining in final presentation
-**Solution**: Added code to delete slide 3 after all lyrics slides are created
+### Phase 1: Search (Parallel Batch Processing)
+**Endpoint**: `POST /api/search-batch`
 
-### 2. Text Overflow (Fixed)
-**Problem**: All lyrics (16+ lines) were being put on each slide instead of 4 lines
-**Solution**: Fixed text replacement logic to properly use only the specified lines_per_slide
+1. **User Input**: Enter list of song names (e.g., "Amazing Grace", "How Great Thou Art")
+2. **Batch Search**: Frontend sends ALL songs in single API call
+3. **Backend Parallel Processing**: Uses `asyncio.gather()` to search all songs simultaneously
+4. **Search Strategy**:
+   - **Priority**: Curated lyrics sites (Genius, AZLyrics, Lyrics.com, Musixmatch, etc.)
+   - **Fallback**: Broader Google search if < 5 results
+   - **Filtering**: Removes YouTube, video sites, and video-related keywords
+5. **AI Validation**: xAI Grok validates each result for relevance and confidence
+6. **Result Caching**: All results cached in frontend for instant navigation
 
-### 3. Bullet Points in Lyrics (Fixed)
-**Problem**: Lyrics were appearing as bullet points
-**Solution**: Added code to explicitly remove bullet formatting and add `buNone` element to paragraphs
+**Performance**: ~47% faster for 5 songs vs sequential (parallel backend processing)
 
-### 4. UNKNOWN ARTIST Removal (Fixed)
-**Problem**: When artist is unknown, "Song Title by UNKNOWN ARTIST" was displayed on every slide
-**Solution**:
-- Updated Grok prompt to not include " by UNKNOWN ARTIST" suffix
-- Added fallback logic in `parse_grok_response()` to strip " by UNKNOWN ARTIST" (case-insensitive)
+### Phase 2: URL Selection
+1. **User Reviews Results**: For each song, user sees validated search results
+2. **Instant Navigation**: Results pre-cached, no waiting between songs
+3. **Manual Input Fallback**: If no good results, user can paste lyrics manually
+4. **Selection**: User picks best URL for each song
+
+### Phase 3: Lyrics Extraction (Parallel)
+**Endpoint**: `POST /api/extract-lyrics`
+
+1. **Batch Extraction**: All URLs processed in parallel (batches of 5)
+2. **Playwright Scraping**:
+   - Headless Chromium with realistic user agent
+   - Adaptive timeout (1.5-2s) for lyrics selector
+   - Handles JavaScript-rendered sites
+3. **AI Extraction with Grok**:
+   - Model: `grok-4-fast-non-reasoning`
+   - Extracts song title + lyrics
+   - **Intelligent Grouping**: Groups lyrics by song structure (verse, chorus, bridge)
+   - **Metadata Cleaning**: Removes [tags], (ad-libs), timestamps, etc.
+   - **Title Cleaning**: Removes (Live), (Official), (Lyric Video), etc.
+4. **Format**: Returns structured data with `---TITLE---`, `---LYRICS---`, `---SLIDE---` markers
+
+### Phase 4: Review & Reselection
+**Endpoint**: `POST /api/review-extraction`
+
+1. **Preview**: User reviews extracted lyrics for each song
+2. **AI Validation**: xAI checks extraction quality (structure, completeness, cleanliness)
+3. **Reselection Option**: If extraction poor, user can pick different URL
+4. **Manual Edit**: User can paste corrected lyrics if needed
+
+### Phase 5: Presentation Generation
+**Endpoint**: `POST /api/generate`
+
+1. **Template Approach**: Modifies `reference_template.pptx` directly (preserves ALL formatting)
+2. **Template Structure**:
+   - Slide 1: Title slide with date (auto-updated to current date)
+   - Slide 2: Welcome slide
+   - Slide 3: Lyrics template (copied for each lyrics slide, then deleted)
+3. **Slide Duplication**:
+   - Deep copies Slide 3 at XML level (preserves theme colors, fonts, backgrounds)
+   - Replaces text while maintaining formatting
+   - Removes bullet points from lyrics
+   - Adds slide numbers (e.g., "1/4", "2/4")
+4. **Output**: `church_style_output.pptx` with black background, white text, proper fonts
+
+## Key Technical Decisions
+
+### Why Template Modification Instead of Creation?
+**Problem**: Creating new Presentation() and copying slides loses theme colors and formatting.
+
+**Solution**: Work within the template file itself:
+```python
+# Copy template to temp file
+shutil.copy('reference_template.pptx', 'temp_working.pptx')
+prs = Presentation('temp_working.pptx')
+
+# Keep first 3 slides, delete rest
+# Duplicate slide 3 for each lyrics slide using deepcopy(element)
+# Delete slide 3 template after done
+# Save and cleanup
+```
+
+**Result**: Preserves MSO_THEME_COLOR references, master slides, all formatting.
+
+### Why Batch Search Endpoint?
+**Problem**: Frontend parallel requests were processed sequentially on backend.
+
+**Solution**: Single endpoint that receives all song names and uses `asyncio.gather()`:
+```python
+@app.post("/api/search-batch")
+async def search_songs_batch(request: BatchSearchRequest):
+    search_tasks = [search_lyrics(song) for song in request.song_names]
+    all_results = await asyncio.gather(*search_tasks)
+    return batch_response
+```
+
+**Result**: True parallelism, 47% faster for 5 songs.
+
+### Why AI for Metadata Cleaning?
+**Problem**: Regex can't distinguish between metadata `(yeah)` and lyrical content `(How great is our God)`.
+
+**Solution**: xAI Grok with detailed prompt removes [tags], (ad-libs), timestamps while keeping meaningful parentheticals.
+
+### Why Curated Sites List?
+**Problem**: Google returns YouTube videos, music stores, random blogs.
+
+**Solution**: Priority search on 8 trusted lyrics sites, then filtered fallback:
+```python
+CURATED_LYRICS_SITES = [
+    "genius.com", "azlyrics.com", "lyrics.com",
+    "musixmatch.com", "lyricsmode.com", "songlyrics.com",
+    "metrolyrics.com", "lyricsfreak.com"
+]
+```
 
 ## Template Structure (reference_template.pptx)
 
@@ -264,22 +370,100 @@ All subsequent lyrics slides will be duplicates of Slide 3.
 - Playwright: Web scraping
 - Grok AI: Lyrics extraction and grouping
 
-## Testing
+## Environment Setup
 
-Run tests with:
+### Required Environment Variables
+Create `.env` file in project root:
 ```bash
-source venv/bin/activate
-python3 backend/church_template_v3.py
+XAI_API_KEY=your_xai_api_key_here
+GOOGLE_API_KEY=your_google_api_key_here
+GOOGLE_SEARCH_ENGINE_ID=your_search_engine_id_here
 ```
 
-Output: `church_style_output.pptx`
+### Installation
+```bash
+# Backend
+cd backend
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+playwright install chromium
+
+# Frontend
+cd ../
+npm install
+```
+
+### Running the Application
+```bash
+# Terminal 1 - Backend (from project root)
+cd backend
+source venv/bin/activate
+python3 -m uvicorn main:app --reload --port 8000
+
+# Terminal 2 - Frontend (from project root)
+npm run dev
+```
+
+Access: http://localhost:5173
+
+## Common Issues & Solutions
+
+### Issue: Date showing "2525" instead of '25
+**Cause**: Replacing individual text runs caused duplication/concatenation.
+**Fix**: Replace entire text frame instead: `shape.text_frame.text = date_str`
+
+### Issue: Song titles have "(Live)", "(Official)", etc.
+**Cause**: Extracted raw metadata from source.
+**Fix**: Added title cleaning instruction to Grok prompt.
+
+### Issue: YouTube videos in search results
+**Cause**: Google returns all content types.
+**Fix**: Curated site priority + video site/keyword filtering.
+
+### Issue: Metadata in lyrics ([Intro:], (yeah), etc.)
+**Cause**: Source pages include performance annotations.
+**Fix**: Detailed Grok prompt with explicit removal instructions.
+
+### Issue: System too slow (sequential processing)
+**Cause**: Frontend parallel requests processed sequentially on backend.
+**Fix**: Batch endpoint with `asyncio.gather()` for true parallelism.
+
+### Issue: Template formatting lost
+**Cause**: Creating new Presentation() instead of modifying template.
+**Fix**: Work within template file using deepcopy at XML level.
+
+## Testing
+
+### Test Batch Search Performance
+```bash
+python3 test_batch_search.py
+```
+Expected: ~47% faster for 5 songs (parallel vs sequential).
+
+### Test Church Template
+```bash
+cd backend
+python3 church_template.py
+```
+Expected: `church_style_output.pptx` created with proper formatting.
+
+## Performance Metrics
+
+- **Search (5 songs)**: ~7-8 seconds (parallel batch)
+- **Search (5 songs sequential)**: ~13-15 seconds (old way)
+- **Extraction per song**: ~2-4 seconds
+- **Presentation generation**: ~1-2 seconds
+- **Total workflow (5 songs)**: ~30-45 seconds
 
 ## System Status
 
 All major features are working:
-✅ Template modification approach preserves all formatting
-✅ Lyrics extraction with Grok AI
-✅ Presentation generation with proper slide duplication
-✅ Date updates on title slide
+✅ Parallel batch search (47% faster)
+✅ AI-powered lyrics extraction & cleaning
+✅ Template formatting preservation
+✅ Date auto-update (01 Nov'25 format)
+✅ Title cleaning (removes Live, Official, etc.)
 ✅ No bullet points in lyrics
-✅ Proper line-per-slide logic
+✅ Manual lyrics input fallback
+✅ AI validation & reselection

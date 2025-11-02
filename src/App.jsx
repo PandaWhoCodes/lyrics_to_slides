@@ -51,6 +51,9 @@ function App() {
   const [extractedSongs, setExtractedSongs] = useState([])
   const [songSearchHistory, setSongSearchHistory] = useState({}) // Store search results for reselection
   const [reselectingSongName, setReselectingSongName] = useState('') // Track which song is being reselected
+  const [manualInputSongName, setManualInputSongName] = useState('')
+  const [manualLyricsText, setManualLyricsText] = useState('')
+  const [showManualInput, setShowManualInput] = useState(false)
 
   // Cycle through loading messages
   useEffect(() => {
@@ -105,22 +108,26 @@ function App() {
     setCurrentSongIndex(0)
     setValidSongs(filteredSongs)
     setSelectedUrls([])
+    setLoadingMessage(`Searching for all ${filteredSongs.length} songs...`)
 
     try {
-      // Search for the first song
-      const response = await axios.post('/api/search', {
-        song_name: filteredSongs[0]
+      // Use batch endpoint to search ALL songs in parallel on backend
+      const response = await axios.post('/api/search-batch', {
+        song_names: filteredSongs
       })
 
-      // Store search results for potential reselection
-      const newHistory = { ...songSearchHistory }
-      newHistory[filteredSongs[0]] = response.data
+      // Cache all results
+      const newHistory = {}
+      response.data.forEach(songResult => {
+        newHistory[songResult.song_name] = songResult.results
+      })
       setSongSearchHistory(newHistory)
 
-      setSearchResults(response.data)
+      // Show first song's results
+      setSearchResults(response.data[0].results)
       setCurrentStep('select')
     } catch (err) {
-      setError(err.response?.data?.detail || 'Error searching for song')
+      setError(err.response?.data?.detail || 'Error searching for songs')
     } finally {
       setLoading(false)
     }
@@ -134,27 +141,10 @@ function App() {
     const nextIndex = currentSongIndex + 1
 
     if (nextIndex < validSongs.length) {
-      // Search for the next song
-      setLoading(true)
-      setError('')
+      // All results are already cached - instant transition!
       setCurrentSongIndex(nextIndex)
-
-      try {
-        const response = await axios.post('/api/search', {
-          song_name: validSongs[nextIndex]
-        })
-
-        // Store search results for potential reselection
-        const newHistory = { ...songSearchHistory }
-        newHistory[validSongs[nextIndex]] = response.data
-        setSongSearchHistory(newHistory)
-
-        setSearchResults(response.data)
-      } catch (err) {
-        setError(err.response?.data?.detail || 'Error searching for song')
-      } finally {
-        setLoading(false)
-      }
+      setSearchResults(songSearchHistory[validSongs[nextIndex]])
+      setCurrentStep('select')
     } else {
       // All songs selected, validate lyrics extraction
       await validateLyrics(newSelectedUrls)
@@ -180,6 +170,71 @@ function App() {
     setExtractedSongs(extractedSongs.filter(s => s.songName !== songName))
     // Also remove from selectedUrls to prevent duplicates
     setSelectedUrls(selectedUrls.filter(s => s.song !== songName))
+  }
+
+  const handleManualInput = (songName) => {
+    setManualInputSongName(songName)
+    setManualLyricsText('')
+    setShowManualInput(true)
+  }
+
+  const handleSubmitManualLyrics = async () => {
+    if (!manualLyricsText.trim()) {
+      setError('Please enter lyrics')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+
+    try {
+      const response = await axios.post('/api/manual-lyrics', {
+        title: manualInputSongName,
+        lyrics: manualLyricsText,
+        clean_formatting: true
+      })
+
+      if (response.data.success) {
+        // Update extractedSongs with the manual lyrics
+        const existingIndex = extractedSongs.findIndex(s => s.songName === manualInputSongName)
+
+        const manualEntry = {
+          success: true,
+          title: response.data.title,
+          lyrics: response.data.lyrics,
+          songName: manualInputSongName,
+          originalUrl: 'manual-input',
+          url: 'manual-input'
+        }
+
+        if (existingIndex >= 0) {
+          const updatedSongs = [...extractedSongs]
+          updatedSongs[existingIndex] = manualEntry
+          setExtractedSongs(updatedSongs)
+        } else {
+          setExtractedSongs([...extractedSongs, manualEntry])
+        }
+
+        // Also update selectedUrls
+        const urlIndex = selectedUrls.findIndex(s => s.song === manualInputSongName)
+        if (urlIndex >= 0) {
+          const updatedUrls = [...selectedUrls]
+          updatedUrls[urlIndex] = { song: manualInputSongName, url: 'manual-input' }
+          setSelectedUrls(updatedUrls)
+        } else {
+          setSelectedUrls([...selectedUrls, { song: manualInputSongName, url: 'manual-input' }])
+        }
+
+        setShowManualInput(false)
+        setManualInputSongName('')
+        setManualLyricsText('')
+        setError('')
+      }
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Error processing manual lyrics')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleReselectResult = async (url) => {
@@ -429,6 +484,12 @@ function App() {
                             Try Different Source
                           </button>
                           <button
+                            className="action-button manual"
+                            onClick={() => handleManualInput(song.songName)}
+                          >
+                            Enter Lyrics Manually
+                          </button>
+                          <button
                             className="action-button remove"
                             onClick={() => handleRemoveSong(song.songName)}
                           >
@@ -543,6 +604,68 @@ function App() {
               >
                 Generate Slides
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Manual Lyrics Input Modal */}
+        {showManualInput && (
+          <div className="modal-overlay" onClick={() => setShowManualInput(false)}>
+            <div className="modal-content manual-input-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2>Enter Lyrics Manually</h2>
+                <button
+                  className="modal-close"
+                  onClick={() => setShowManualInput(false)}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="modal-body">
+                <p className="modal-subtitle">
+                  Paste lyrics for: <strong>{manualInputSongName}</strong>
+                </p>
+
+                <textarea
+                  className="lyrics-input"
+                  placeholder="Paste the song lyrics here...
+
+You can include section markers like [Verse 1], [Chorus], etc.
+They will be automatically cleaned for the presentation."
+                  value={manualLyricsText}
+                  onChange={(e) => setManualLyricsText(e.target.value)}
+                  rows={20}
+                />
+
+                <div className="modal-tips">
+                  <p>💡 Tips:</p>
+                  <ul>
+                    <li>The lyrics will be automatically cleaned of metadata</li>
+                    <li>Section markers like [Verse], [Chorus] will be removed</li>
+                    <li>Ad-libs like (yeah), (oh) will be removed</li>
+                    <li>The lyrics will be grouped into slides automatically</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  className="button secondary"
+                  onClick={() => setShowManualInput(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="button primary"
+                  onClick={handleSubmitManualLyrics}
+                  disabled={loading || !manualLyricsText.trim()}
+                >
+                  {loading ? 'Processing...' : 'Add Lyrics'}
+                </button>
+              </div>
+
+              {error && <div className="error">{error}</div>}
             </div>
           </div>
         )}

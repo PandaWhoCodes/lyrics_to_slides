@@ -27,8 +27,13 @@ async def fetch_with_playwright(url: str) -> str:
                 # If that fails, try with load event
                 await page.goto(url, wait_until='load', timeout=60000)
 
-            # Wait for content to render
-            await page.wait_for_timeout(5000)
+            # Wait for content to render (reduced from 5000ms)
+            # Try to wait for common lyrics selectors, with fallback to shorter timeout
+            try:
+                await page.wait_for_selector('[class*="lyrics"], [class*="Lyrics"], [data-lyrics-container]', timeout=2000)
+            except:
+                # If no lyrics selector found, just wait a bit for JS to render
+                await page.wait_for_timeout(1500)
 
             # Get the full page content
             content = await page.content()
@@ -101,9 +106,9 @@ async def extract_lyrics(url: str) -> str:
                 "messages": [
                     {
                         "role": "system",
-                        "content": """You are a song information extraction assistant.
+                        "content": """You are a song lyrics extraction assistant for church worship presentations.
 
-Extract the song title and lyrics from the provided webpage text, and group lyrics intelligently.
+Extract the song title and CLEAN lyrics from the provided webpage text.
 
 CRITICAL FORMATTING - MUST FOLLOW EXACTLY:
 ---TITLE---
@@ -118,16 +123,40 @@ Line 2 of chorus
 Line 1 of verse 2
 Line 2 of verse 2
 
+METADATA TO REMOVE (NEVER include these):
+- Section markers: [Intro:], [Verse 1:], [Verse 2:], [Chorus:], [Bridge:], [Outro:], [Pre-Chorus:], etc.
+- Artist annotations: [Chandler Moore:], [Brandon Lake:], (feat. Artist Name), etc.
+- Performance instructions: (Repeat), (x2), (x3), (2X), etc.
+- Ad-libs and sounds: (yeah), (oh), (uh), (woo), (clap), etc.
+- Time stamps: [0:45], (2:30), etc.
+- Any text in square brackets [ ] or angle brackets < >
+- YouTube metadata like "views", "likes", "subscribe"
+
+WHAT TO KEEP:
+- Actual song lyrics that are meant to be sung
+- Meaningful parenthetical content that's part of the lyrics, like: (How great is our God), (I will praise)
+
 RULES:
 1. First line MUST be exactly "---TITLE---"
-2. Second line is the song title with artist (e.g., "Thunder by Imagine Dragons")
-   - If artist is unknown, just use the song title without " by UNKNOWN ARTIST"
+2. Second line is the song title with artist (e.g., "What A Beautiful Name by Hillsong Worship")
+   - If artist is unknown, just use the song title WITHOUT adding "by UNKNOWN ARTIST"
+   - CLEAN the title: Remove (Live), (Official), (Lyric Video), (Audio), etc. from title
+   - Example: "Endless Praise (Live) by Maverick City Music" → "Endless Praise by Maverick City Music"
 3. Third line MUST be exactly "---LYRICS---"
-4. Then the grouped lyrics with "---SLIDE---" between sections
-5. Group by natural song structure (verses, choruses, bridges)
-6. Keep complete sections together
-7. Remove all non-lyric content (ads, navigation, etc.)
-8. If no clear lyrics found, return 'NO_LYRICS_FOUND'"""
+4. Group lyrics by natural song structure with "---SLIDE---" between sections
+5. Keep verses, choruses, and bridges intact as logical units
+6. DO NOT include section labels - the structure should be clear from repetition
+7. Clean all metadata but preserve the actual lyrics' meaning
+8. If no clear lyrics found, return 'NO_LYRICS_FOUND'
+
+EXAMPLE of what to remove:
+[Verse 1: Brandon Lake]
+I'll praise in the valley (yeah)
+Praise on the mountain (oh)
+
+Should become:
+I'll praise in the valley
+Praise on the mountain"""
                     },
                     {
                         "role": "user",

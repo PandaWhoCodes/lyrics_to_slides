@@ -107,7 +107,7 @@ def create_presentation(all_lyrics: List[str], song_names: List[str], lines_per_
     # Use church template if requested
     if use_church_template:
         try:
-            from backend.church_template import create_church_presentation_v3
+            from church_template import create_church_presentation_v3
             return create_church_presentation_v3(all_lyrics, song_names, lines_per_slide)
         except ImportError:
             print("Church template not available, using default template")
