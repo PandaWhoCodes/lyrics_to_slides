@@ -1,25 +1,21 @@
 # Multi-stage build for lyrics-to-slides application
-FROM node:18-slim AS frontend-builder
+FROM node:18-alpine AS frontend-builder
 
 # Build frontend
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 COPY . .
-RUN npm run build
+RUN npm run build && npm prune --production
 
 # Python backend with Playwright
 FROM python:3.11-slim
 
-# Install system dependencies for Playwright and PPT generation
-# Installing all dependencies manually to avoid playwright install-deps issues
-RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
+# Install only essential runtime dependencies for Playwright
+# Remove build tools and unnecessary packages after installation
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     fonts-liberation \
-    fonts-noto-color-emoji \
-    fonts-unifont \
     libnss3 \
     libnspr4 \
     libatk1.0-0 \
@@ -40,40 +36,49 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     libglib2.0-0 \
     libgdk-pixbuf-2.0-0 \
-    libgtk-3-0 \
     libx11-6 \
     libx11-xcb1 \
     libxcb1 \
     libxext6 \
     libxrender1 \
     libxtst6 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Set working directory
 WORKDIR /app
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip cache purge
 
-# Install Playwright Chromium browser only (skip install-deps)
-RUN playwright install chromium --with-deps || playwright install chromium
+# Install Playwright Chromium browser only
+RUN playwright install chromium --with-deps || playwright install chromium \
+    && rm -rf /root/.cache/ms-playwright/*/.git \
+    && rm -rf /root/.cache/pip
 
 # Copy backend code
 COPY backend/ ./backend/
 COPY reference_template.pptx ./
 
-# Copy frontend build from builder stage
+# Copy frontend build from builder stage (only dist folder)
 COPY --from=frontend-builder /app/dist ./dist
 
 # Create directory for generated files
 RUN mkdir -p /data
 
+# Remove unnecessary files to reduce size
+RUN find /usr/local/lib/python3.11 -type d -name tests -exec rm -rf {} + 2>/dev/null || true \
+    && find /usr/local/lib/python3.11 -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true \
+    && rm -rf /tmp/* /var/tmp/*
+
 # Expose port
 EXPOSE 8080
 
 # Set environment variable for production
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
