@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional
 import os
@@ -19,11 +20,16 @@ app = FastAPI()
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files (frontend) - check if dist directory exists
+dist_path = os.path.join(os.path.dirname(__file__), "..", "dist")
+if os.path.exists(dist_path):
+    app.mount("/assets", StaticFiles(directory=os.path.join(dist_path, "assets")), name="assets")
 
 class SearchRequest(BaseModel):
     song_name: str
@@ -67,14 +73,23 @@ class ManualLyricsResponse(BaseModel):
     lyrics: str
     slide_groups: Optional[List[str]] = None  # Lyrics grouped for slides
 
-@app.get("/")
-async def root():
-    return {"message": "Lyrics to Slides API"}
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Fly.io"""
     return {"status": "healthy", "service": "lyrics-to-slides"}
+
+@app.get("/api")
+async def api_root():
+    """API root endpoint"""
+    return {"message": "Lyrics to Slides API"}
+
+@app.get("/")
+async def serve_frontend():
+    """Serve the React frontend"""
+    index_path = os.path.join(os.path.dirname(__file__), "..", "dist", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"message": "Frontend not built. Run 'npm run build' first."}
 
 @app.post("/api/search", response_model=List[SearchResult])
 async def search_song(request: SearchRequest):
