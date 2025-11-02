@@ -11,6 +11,22 @@ import shutil
 from copy import deepcopy
 
 
+def insert_blank_separator(prs, separator_template):
+    """
+    Insert a blank black separator slide using template formatting.
+    Copies the separator template and removes all text shapes.
+    """
+    template_layout = separator_template.slide_layout
+    new_slide = prs.slides.add_slide(template_layout)
+
+    # Remove all shapes to make it blank
+    for shape in list(new_slide.shapes):
+        sp = shape.element
+        sp.getparent().remove(sp)
+
+    return new_slide
+
+
 def create_church_presentation_v3(lyrics_list, song_names, lines_per_slide=4):
     """
     Create a church-styled presentation by modifying template directly.
@@ -59,9 +75,20 @@ def create_church_presentation_v3(lyrics_list, song_names, lines_per_slide=4):
     # Get the lyrics template slide (slide 3)
     lyrics_template_slide = prs.slides[2]
 
+    # Store separator template (Slide 2 - Welcome slide)
+    separator_template_slide = prs.slides[1]
+
     # Process each song
     for song_idx, (lyrics, song_name) in enumerate(zip(lyrics_list, song_names)):
-        print(f"  Processing '{song_name}'...")
+        # Insert separator slide BEFORE songs 2, 3, 4, etc. (not before first song)
+        if song_idx > 0:
+            insert_blank_separator(prs, separator_template_slide)
+            print(f"  Inserted separator slide before song {song_idx + 1}")
+
+        # Clean song name: remove " by Artist" for display
+        display_title = song_name.split(' by ')[0].strip()
+
+        print(f"  Processing '{display_title}'...")
 
         # Clean and process lyrics
         lyrics = lyrics.replace('---SLIDE---', '\n\n')
@@ -104,7 +131,7 @@ def create_church_presentation_v3(lyrics_list, song_names, lines_per_slide=4):
                         for paragraph in shape.text_frame.paragraphs:
                             for run in paragraph.runs:
                                 if run.text.strip():
-                                    run.text = song_name
+                                    run.text = display_title
                                     break
                     # Main lyrics text (large text in middle)
                     elif Inches(1) < shape.top < Inches(4.5):
