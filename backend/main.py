@@ -71,6 +71,11 @@ class ManualLyricsResponse(BaseModel):
 async def root():
     return {"message": "Lyrics to Slides API"}
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Fly.io"""
+    return {"status": "healthy", "service": "lyrics-to-slides"}
+
 @app.post("/api/search", response_model=List[SearchResult])
 async def search_song(request: SearchRequest):
     """Search for song lyrics using Google Custom Search"""
