@@ -18,6 +18,12 @@ primary_region = "lax"  # Los Angeles - change to region closest to you
   min_machines_running = 0
   processes = ["app"]
 
+  # Stop machine after 5 minutes of no HTTP requests (300 seconds)
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 25
+    soft_limit = 20
+
   [[http_service.http_checks]]
     interval = "10s"
     timeout = "2s"
