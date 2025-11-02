@@ -12,11 +12,14 @@ RUN npm run build
 FROM python:3.11-slim
 
 # Install system dependencies for Playwright and PPT generation
+# Installing all dependencies manually to avoid playwright install-deps issues
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     ca-certificates \
     fonts-liberation \
+    fonts-noto-color-emoji \
+    fonts-unifont \
     libnss3 \
     libnspr4 \
     libatk1.0-0 \
@@ -34,6 +37,16 @@ RUN apt-get update && apt-get install -y \
     libcairo2 \
     libasound2 \
     libatspi2.0-0 \
+    libxshmfence1 \
+    libglib2.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    libgtk-3-0 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxext6 \
+    libxrender1 \
+    libxtst6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -43,9 +56,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright and Chromium
-RUN playwright install chromium
-RUN playwright install-deps chromium
+# Install Playwright Chromium browser only (skip install-deps)
+RUN playwright install chromium --with-deps || playwright install chromium
 
 # Copy backend code
 COPY backend/ ./backend/
