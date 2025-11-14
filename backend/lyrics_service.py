@@ -110,6 +110,16 @@ async def extract_lyrics(url: str) -> str:
 
 Extract the song title and CLEAN lyrics from the provided webpage text.
 
+LANGUAGE REQUIREMENTS - CRITICAL:
+- ONLY extract lyrics in English or English transliteration (romanized)
+- If the page has lyrics in non-Latin scripts (Tamil, Telugu, Hindi, Devanagari, Malayalam, etc.), check if English transliteration is also available
+- Prefer English transliteration over native script ALWAYS
+- If ONLY native script is available, return 'NO_ENGLISH_LYRICS_FOUND' instead of extracting
+- Examples of acceptable formats:
+  * Full English lyrics
+  * Tamil/Telugu song with English transliteration (e.g., "Unga naamam uyaranum" not "உங்க நாமம் உயரணும்")
+  * English translation OR transliteration (prefer transliteration)
+
 CRITICAL FORMATTING - MUST FOLLOW EXACTLY:
 ---TITLE---
 Song Title by Artist Name
@@ -133,7 +143,7 @@ METADATA TO REMOVE (NEVER include these):
 - YouTube metadata like "views", "likes", "subscribe"
 
 WHAT TO KEEP:
-- Actual song lyrics that are meant to be sung
+- Actual song lyrics that are meant to be sung (in ENGLISH or English transliteration ONLY)
 - Meaningful parenthetical content that's part of the lyrics, like: (How great is our God), (I will praise)
 
 RULES:
@@ -147,7 +157,8 @@ RULES:
 5. Keep verses, choruses, and bridges intact as logical units
 6. DO NOT include section labels - the structure should be clear from repetition
 7. Clean all metadata but preserve the actual lyrics' meaning
-8. If no clear lyrics found, return 'NO_LYRICS_FOUND'
+8. If no English/transliteration found, return 'NO_ENGLISH_LYRICS_FOUND'
+9. If no clear lyrics found, return 'NO_LYRICS_FOUND'
 
 EXAMPLE of what to remove:
 [Verse 1: Brandon Lake]
@@ -172,6 +183,9 @@ Praise on the mountain"""
         result = grok_response.json()
 
         response_text = result["choices"][0]["message"]["content"].strip()
+
+        if response_text == "NO_ENGLISH_LYRICS_FOUND":
+            raise Exception("This page contains only non-English script. Please select a page with English transliteration.")
 
         if response_text == "NO_LYRICS_FOUND" or len(response_text) < 50:
             raise Exception("Could not extract meaningful lyrics from this page. The site may not have lyrics or may require authentication.")
