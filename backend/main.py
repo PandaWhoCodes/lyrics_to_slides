@@ -210,11 +210,13 @@ async def generate_presentation(request: GenerateRequest, background_tasks: Back
         # Add background task to delete file after sending
         background_tasks.add_task(cleanup_file, filename)
 
-        # Create response
+        # Create response with explicit headers
         return FileResponse(
             path=filename,
-            filename="lyrics_presentation.pptx",
-            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            headers={
+                "Content-Disposition": "attachment; filename=lyrics_presentation.pptx"
+            }
         )
     except Exception as e:
         # Clean up file if there was an error

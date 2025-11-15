@@ -46,7 +46,15 @@ Thumbs.db
 
 # Documentation
 docs/
+CHANGES.md
+REDESIGN_SUMMARY.md
+UI_ENHANCEMENT_GUIDE.md
+ANIMATION_PATTERNS.md
+.claude/UI_CONTEXT.md
 
 # Scripts (not needed in container)
 install.sh
 start.sh
+
+# Playwright MCP (if present)
+.playwright-mcp/
