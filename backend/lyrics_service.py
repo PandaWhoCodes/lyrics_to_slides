@@ -1,17 +1,83 @@
 import requests
 import os
+import urllib.parse
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 
 # Load from environment variable
 XAI_API_KEY = os.getenv("XAI_API_KEY", "")
 
+# CORS proxies for sites that block direct requests
+CORS_PROXIES = [
+    {
+        "name": "AllOrigins",
+        "url": "https://api.allorigins.win/get?url={url}",
+        "response_key": "contents"
+    },
+    {
+        "name": "corsproxy.io",
+        "url": "https://corsproxy.io/?{url}",
+        "response_key": None  # Direct response
+    },
+]
+
+def fetch_with_cors_proxy(url: str) -> str:
+    """
+    Fetch webpage content using CORS proxies for sites that block direct requests.
+    Tries multiple proxies until one succeeds.
+    """
+    encoded_url = urllib.parse.quote(url, safe='')
+    last_error = None
+
+    for proxy in CORS_PROXIES:
+        try:
+            proxy_url = proxy["url"].format(url=encoded_url)
+            print(f"  🌐 Trying {proxy['name']} proxy: {url}")
+
+            response = requests.get(proxy_url, timeout=30, headers={
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+            })
+            response.raise_for_status()
+
+            if proxy["response_key"]:
+                # JSON response with content in a specific key
+                data = response.json()
+                if proxy["response_key"] in data:
+                    content = data[proxy["response_key"]]
+                    print(f"  ✅ {proxy['name']} returned {len(content)} characters")
+                    return content
+                else:
+                    raise Exception(f"Response missing '{proxy['response_key']}' field")
+            else:
+                # Direct HTML response
+                content = response.text
+                print(f"  ✅ {proxy['name']} returned {len(content)} characters")
+                return content
+
+        except Exception as e:
+            print(f"  ⚠️ {proxy['name']} failed: {e}")
+            last_error = e
+            continue
+
+    raise Exception(f"All CORS proxies failed. Last error: {last_error}")
+
+
 async def fetch_with_playwright(url: str) -> str:
     """
     Fetch webpage content using Playwright for JavaScript-rendered sites
     """
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        # Docker/container-friendly Chromium launch args
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--single-process'
+            ]
+        )
         context = await browser.new_context(
             user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             viewport={'width': 1920, 'height': 1080},
@@ -27,13 +93,22 @@ async def fetch_with_playwright(url: str) -> str:
                 # If that fails, try with load event
                 await page.goto(url, wait_until='load', timeout=60000)
 
-            # Wait for content to render (reduced from 5000ms)
-            # Try to wait for common lyrics selectors, with fallback to shorter timeout
-            try:
-                await page.wait_for_selector('[class*="lyrics"], [class*="Lyrics"], [data-lyrics-container]', timeout=2000)
-            except:
-                # If no lyrics selector found, just wait a bit for JS to render
-                await page.wait_for_timeout(1500)
+            # Site-specific wait strategies
+            if 'smule.com' in url.lower():
+                # Smule loads lyrics dynamically, wait longer and look for specific elements
+                print("  ⏳ Waiting for Smule to load lyrics...")
+                try:
+                    await page.wait_for_selector('[class*="lyric"], [class*="Lyric"], [class*="arrangement"]', timeout=10000)
+                except:
+                    await page.wait_for_timeout(5000)  # Fallback wait
+            else:
+                # Wait for content to render
+                # Try to wait for common lyrics selectors, with fallback to shorter timeout
+                try:
+                    await page.wait_for_selector('[class*="lyrics"], [class*="Lyrics"], [data-lyrics-container]', timeout=2000)
+                except:
+                    # If no lyrics selector found, just wait a bit for JS to render
+                    await page.wait_for_timeout(1500)
 
             # Get the full page content
             content = await page.content()
@@ -79,12 +154,52 @@ def extract_lyrics_from_html(html_content: str, url: str) -> str:
 
 async def extract_lyrics(url: str) -> str:
     """
-    Fetch the webpage and extract lyrics using Playwright + xAI Grok
+    Fetch the webpage and extract lyrics using multiple strategies + xAI Grok
     """
     try:
-        # Use Playwright for JavaScript-heavy sites
-        print(f"Fetching URL with Playwright: {url}")
-        webpage_content = await fetch_with_playwright(url)
+        # Sites that require JavaScript rendering - MUST use Playwright first
+        # (CORS proxies only get static HTML, missing dynamically loaded content)
+        js_rendered_sites = ['smule.com']
+        needs_js_rendering = any(site in url.lower() for site in js_rendered_sites)
+
+        # Sites that block headless browsers but serve static HTML - use CORS proxy first
+        static_sites_that_block = ['shazam.com']
+        use_cors_proxy_first = any(site in url.lower() for site in static_sites_that_block)
+
+        webpage_content = None
+
+        if needs_js_rendering:
+            # Sites like Smule load lyrics via JavaScript - MUST use Playwright
+            print(f"🎭 Site requires JavaScript rendering, using Playwright: {url}")
+            try:
+                webpage_content = await fetch_with_playwright(url)
+            except Exception as e:
+                print(f"  ⚠️ Playwright failed: {e}, trying CORS proxy as fallback")
+                try:
+                    webpage_content = fetch_with_cors_proxy(url)
+                except Exception as cors_error:
+                    print(f"  ⚠️ CORS proxy also failed: {cors_error}")
+                    raise e  # Re-raise original Playwright error
+        elif use_cors_proxy_first:
+            # Try CORS proxy first for sites that block scrapers but have static HTML
+            print(f"🌐 Site may block scrapers, trying CORS proxy first: {url}")
+            try:
+                webpage_content = fetch_with_cors_proxy(url)
+            except Exception as e:
+                print(f"  ⚠️ CORS proxy failed: {e}, falling back to Playwright")
+
+        if not webpage_content:
+            # Default: Try Playwright first, then CORS proxy
+            print(f"🎭 Fetching URL with Playwright: {url}")
+            try:
+                webpage_content = await fetch_with_playwright(url)
+            except Exception as playwright_error:
+                print(f"  ⚠️ Playwright failed: {playwright_error}")
+                print(f"  🌐 Trying CORS proxy as fallback...")
+                webpage_content = fetch_with_cors_proxy(url)
+
+        if not webpage_content:
+            raise Exception("Failed to fetch webpage content")
 
         # First try to extract with BeautifulSoup
         lyrics_html = extract_lyrics_from_html(webpage_content, url)
@@ -110,15 +225,17 @@ async def extract_lyrics(url: str) -> str:
 
 Extract the song title and CLEAN lyrics from the provided webpage text.
 
-LANGUAGE REQUIREMENTS - CRITICAL:
-- ONLY extract lyrics in English or English transliteration (romanized)
-- If the page has lyrics in non-Latin scripts (Tamil, Telugu, Hindi, Devanagari, Malayalam, etc.), check if English transliteration is also available
-- Prefer English transliteration over native script ALWAYS
-- If ONLY native script is available, return 'NO_ENGLISH_LYRICS_FOUND' instead of extracting
-- Examples of acceptable formats:
+LANGUAGE REQUIREMENTS:
+- PREFER lyrics in English or English transliteration (romanized Latin script)
+- If the page has lyrics in non-Latin scripts (Tamil, Telugu, Hindi, Devanagari, Malayalam, etc.):
+  1. FIRST check if English transliteration is also available on the page - use that
+  2. If no transliteration exists, YOU MUST TRANSLITERATE the lyrics yourself into romanized form
+  3. NEVER return 'NO_ENGLISH_LYRICS_FOUND' if you can transliterate the text
+- Examples of acceptable output:
   * Full English lyrics
-  * Tamil/Telugu song with English transliteration (e.g., "Unga naamam uyaranum" not "உங்க நாமம் உயரணும்")
-  * English translation OR transliteration (prefer transliteration)
+  * Tamil song: "Unga naamam uyaranum" (NOT "உங்க நாமம் உயரணும்")
+  * Hindi song: "Kya de sakta hu shukriya tera" (NOT "क्या दे सकता हूं शुक्रिया तेरा")
+- ONLY return 'NO_ENGLISH_LYRICS_FOUND' if you cannot find OR transliterate any lyrics
 
 CRITICAL FORMATTING - MUST FOLLOW EXACTLY:
 ---TITLE---

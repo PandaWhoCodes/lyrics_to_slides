@@ -27,10 +27,45 @@ def insert_blank_separator(prs, separator_template):
     return new_slide
 
 
+def deduplicate_slides(slide_texts):
+    """
+    Smart deduplication of slide content.
+    - Removes consecutive duplicate slides (keeps first occurrence)
+    - Returns list of unique slide texts in order
+
+    Example:
+    Input:  ["Verse 1", "Chorus", "Chorus", "Verse 2", "Chorus"]
+    Output: ["Verse 1", "Chorus", "Verse 2", "Chorus"]
+
+    The pastor doesn't need to flip through identical slides back-to-back.
+    """
+    if not slide_texts:
+        return []
+
+    deduplicated = [slide_texts[0]]
+
+    for slide_text in slide_texts[1:]:
+        # Normalize for comparison (strip whitespace, lowercase)
+        current_normalized = slide_text.strip().lower()
+        prev_normalized = deduplicated[-1].strip().lower()
+
+        # Only add if different from previous slide
+        if current_normalized != prev_normalized:
+            deduplicated.append(slide_text)
+        else:
+            print(f"    ⏭️ Skipping duplicate slide (same as previous)")
+
+    return deduplicated
+
+
 def create_church_presentation_v3(lyrics_list, song_names, lines_per_slide=4):
     """
     Create a church-styled presentation by modifying template directly.
     This preserves all original formatting.
+
+    Smart features:
+    - Deduplicates consecutive identical slides (chorus repeated back-to-back)
+    - Keeps the flow natural for worship leaders
     """
     template_path = os.path.join(os.path.dirname(__file__), '..', 'reference_template.pptx')
 
@@ -90,21 +125,40 @@ def create_church_presentation_v3(lyrics_list, song_names, lines_per_slide=4):
 
         print(f"  Processing '{display_title}'...")
 
-        # Clean and process lyrics
-        lyrics = lyrics.replace('---SLIDE---', '\n\n')
-        lyrics_lines = []
+        # Parse lyrics - respect AI's ---SLIDE--- groupings
+        # Split by ---SLIDE--- marker to get pre-grouped sections
+        sections = lyrics.split('---SLIDE---')
 
-        for line in lyrics.split('\n'):
-            line = line.strip()
-            if line and not line.startswith('---'):
-                lyrics_lines.append(line)
+        # Build slide texts from sections
+        all_slide_texts = []
+        for section in sections:
+            # Clean section: remove ---TITLE---, ---LYRICS--- markers and empty lines
+            section_lines = []
+            for line in section.split('\n'):
+                line = line.strip()
+                if line and not line.startswith('---'):
+                    section_lines.append(line)
 
-        # Create slides for this song
-        total_lines = len(lyrics_lines)
+            if not section_lines:
+                continue
 
-        for i in range(0, total_lines, lines_per_slide):
-            slide_lines = lyrics_lines[i:i + lines_per_slide]
-            slide_text = '\n'.join(slide_lines)
+            # If section has more lines than lines_per_slide, split it
+            if len(section_lines) > lines_per_slide:
+                for i in range(0, len(section_lines), lines_per_slide):
+                    chunk = section_lines[i:i + lines_per_slide]
+                    if chunk:
+                        all_slide_texts.append('\n'.join(chunk))
+            else:
+                all_slide_texts.append('\n'.join(section_lines))
+
+        # Smart deduplication - remove consecutive identical slides
+        unique_slide_texts = deduplicate_slides(all_slide_texts)
+
+        print(f"    📊 {len(all_slide_texts)} raw slides → {len(unique_slide_texts)} unique slides")
+
+        total_slides = len(unique_slide_texts)
+
+        for slide_idx, slide_text in enumerate(unique_slide_texts):
 
             # Duplicate the lyrics template slide using its own layout
             # Use the same layout as the template to preserve structure
@@ -156,8 +210,7 @@ def create_church_presentation_v3(lyrics_list, song_names, lines_per_slide=4):
                                     pPr.insert(0, buNone)
                     # Slide number (small text at bottom right)
                     elif shape.top > Inches(4.5) and shape.left > Inches(7):
-                        current_slide_num = i // lines_per_slide + 1
-                        total_slides = (total_lines + lines_per_slide - 1) // lines_per_slide
+                        current_slide_num = slide_idx + 1
                         for paragraph in shape.text_frame.paragraphs:
                             for run in paragraph.runs:
                                 run.text = f"{current_slide_num}/{total_slides}"
@@ -187,13 +240,41 @@ def create_church_presentation_v3(lyrics_list, song_names, lines_per_slide=4):
 
 
 if __name__ == "__main__":
-    # Test
+    # Test with repeated chorus to demonstrate deduplication
     test_lyrics = [
-        """Amazing grace, how sweet the sound
+        """---TITLE---
+Amazing Grace
+---LYRICS---
+Amazing grace, how sweet the sound
 That saved a wretch like me
 I once was lost but now am found
-Was blind, but now I see"""
+Was blind, but now I see
+---SLIDE---
+'Twas grace that taught my heart to fear
+And grace my fears relieved
+How precious did that grace appear
+The hour I first believed
+---SLIDE---
+Amazing grace, how sweet the sound
+That saved a wretch like me
+I once was lost but now am found
+Was blind, but now I see
+---SLIDE---
+Amazing grace, how sweet the sound
+That saved a wretch like me
+I once was lost but now am found
+Was blind, but now I see
+---SLIDE---
+Through many dangers, toils and snares
+I have already come
+'Tis grace hath brought me safe thus far
+And grace will lead me home"""
     ]
     test_songs = ["Amazing Grace"]
+
+    print("Testing smart deduplication...")
+    print("Input has 5 slides, with slides 1, 3, 4 being identical (chorus repeated)")
+    print("Expected output: 4 unique slides (consecutive duplicates removed)")
+    print()
 
     create_church_presentation_v3(test_lyrics, test_songs, lines_per_slide=4)

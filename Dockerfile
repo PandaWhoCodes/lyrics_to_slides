@@ -53,8 +53,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip cache purge
 
-# Install Playwright Chromium browser only
-RUN playwright install chromium --with-deps || playwright install chromium \
+# Install Playwright Chromium browser only (deps already installed above)
+RUN playwright install chromium \
     && rm -rf /root/.cache/ms-playwright/*/.git \
     && rm -rf /root/.cache/pip
 

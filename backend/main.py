@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 # Load environment variables BEFORE importing other modules
 load_dotenv()
 
-from search_service import search_lyrics
+from search_service import search_lyrics, search_all_sites
 from lyrics_service import extract_lyrics
 from pptx_service import create_presentation
 
@@ -117,6 +117,15 @@ async def search_songs_batch(request: BatchSearchRequest):
             ))
 
         return batch_response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/search-all", response_model=List[SearchResult])
+async def search_all(request: SearchRequest):
+    """Search all sites without curated restrictions - for broader results"""
+    try:
+        results = await search_all_sites(request.song_name)
+        return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

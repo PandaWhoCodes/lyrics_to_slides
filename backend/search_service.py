@@ -60,7 +60,9 @@ CURATED_LYRICS_SITES = [
     "praisecharts.com",
     "worshiptogether.com",
     "christianlyricz.com",
-    "worldtamilchristians.com"
+    "worldtamilchristians.com",
+    # User-generated content sites with lyrics
+    "smule.com"
 ]
 
 async def search_curated_sites(song_name: str) -> List[Dict[str, str]]:
@@ -152,8 +154,9 @@ async def search_lyrics(song_name: str) -> List[Dict[str, str]]:
                     is_video = any(site in link for site in video_sites)
 
                     # Also filter if title suggests it's a video
+                    # Note: 'karaoke' removed - these pages often have lyrics
                     video_keywords = ['official video', 'music video', 'lyric video',
-                                     'official audio', 'visualizer', 'karaoke', 'instrumental']
+                                     'official audio', 'visualizer', 'instrumental']
                     has_video_keyword = any(keyword in title for keyword in video_keywords)
 
                     # Skip video results
@@ -184,8 +187,9 @@ async def search_lyrics(song_name: str) -> List[Dict[str, str]]:
                         video_sites = ['youtube.com', 'youtu.be', 'vimeo.com', 'dailymotion.com',
                                        'facebook.com/watch', 'tiktok.com', 'instagram.com']
                         is_video = any(site in link for site in video_sites)
+                        # Note: 'karaoke' removed - these pages often have lyrics
                         video_keywords = ['official video', 'music video', 'lyric video',
-                                         'official audio', 'visualizer', 'karaoke', 'instrumental']
+                                         'official audio', 'visualizer', 'instrumental']
                         has_video_keyword = any(keyword in title for keyword in video_keywords)
 
                         if not (is_video or has_video_keyword):
@@ -204,6 +208,63 @@ async def search_lyrics(song_name: str) -> List[Dict[str, str]]:
     print(f"📊 Total results: {len(all_results)}")
 
     # Step 3: Validate and rank results using AI
+    if all_results:
+        print(f"🤖 Validating results with AI...")
+        validated_results = await validate_search_results(song_name, all_results)
+        return validated_results
+
+    return all_results
+
+
+async def search_all_sites(song_name: str) -> List[Dict[str, str]]:
+    """
+    Search all Google results without site restrictions.
+    Used when user clicks "Search All Sites" for broader results.
+    """
+    query, _ = build_search_query(song_name)
+
+    url = "https://www.googleapis.com/customsearch/v1"
+    all_results = []
+
+    print(f"🌐 Searching ALL sites for: {song_name}")
+
+    # Fetch up to 20 results (2 batches of 10)
+    for start_index in [1, 11]:
+        params = {
+            "key": GOOGLE_API_KEY,
+            "cx": SEARCH_ENGINE_ID,
+            "q": query,
+            "num": 10,
+            "start": start_index
+        }
+
+        try:
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+
+            if "items" in data:
+                for item in data["items"]:
+                    link = item.get("link", "").lower()
+
+                    # Only filter out actual video sites
+                    video_sites = ['youtube.com', 'youtu.be', 'vimeo.com',
+                                  'dailymotion.com', 'tiktok.com']
+                    is_video = any(site in link for site in video_sites)
+
+                    if not is_video:
+                        all_results.append({
+                            "title": item.get("title", ""),
+                            "link": item.get("link", ""),
+                            "snippet": item.get("snippet", ""),
+                            "source": "all_sites"
+                        })
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Error in search all sites: {str(e)}")
+
+    print(f"✅ Found {len(all_results)} results from all sites")
+
+    # Validate with AI
     if all_results:
         print(f"🤖 Validating results with AI...")
         validated_results = await validate_search_results(song_name, all_results)

@@ -66,6 +66,8 @@ function App() {
   const [manualInputSongName, setManualInputSongName] = useState('')
   const [manualLyricsText, setManualLyricsText] = useState('')
   const [showManualInput, setShowManualInput] = useState(false)
+  const [preloadedLyrics, setPreloadedLyrics] = useState({}) // Cache for preloaded lyrics
+  const [preloadingUrls, setPreloadingUrls] = useState(new Set()) // Track URLs being preloaded
 
   // Cycle through loading messages
   useEffect(() => {
@@ -114,6 +116,8 @@ function App() {
     setCurrentSongIndex(0)
     setValidSongs(filteredSongs)
     setSelectedUrls([])
+    setPreloadedLyrics({}) // Clear preloaded cache
+    setPreloadingUrls(new Set())
     setLoadingMessage(`Searching for all ${filteredSongs.length} songs...`)
 
     try {
@@ -136,9 +140,50 @@ function App() {
     }
   }
 
+  // Preload lyrics in the background (fire and forget)
+  const preloadLyrics = async (url, songName) => {
+    // Skip if already preloaded or currently preloading
+    if (preloadedLyrics[url] || preloadingUrls.has(url)) {
+      return
+    }
+
+    // Mark as preloading
+    setPreloadingUrls(prev => new Set([...prev, url]))
+
+    try {
+      const response = await axios.post('/api/extract-lyrics', {
+        urls: [url]
+      })
+
+      if (response.data && response.data[0]) {
+        setPreloadedLyrics(prev => ({
+          ...prev,
+          [url]: {
+            ...response.data[0],
+            songName: songName,
+            originalUrl: url
+          }
+        }))
+      }
+    } catch (err) {
+      console.log('Preload failed for:', url, err)
+      // Silently fail - will be retried during final validation
+    } finally {
+      setPreloadingUrls(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(url)
+        return newSet
+      })
+    }
+  }
+
   const handleSelectResult = async (url) => {
-    const newSelectedUrls = [...selectedUrls, { song: validSongs[currentSongIndex], url }]
+    const currentSong = validSongs[currentSongIndex]
+    const newSelectedUrls = [...selectedUrls, { song: currentSong, url }]
     setSelectedUrls(newSelectedUrls)
+
+    // Start preloading lyrics for the selected URL in the background
+    preloadLyrics(url, currentSong)
 
     const nextIndex = currentSongIndex + 1
 
@@ -147,7 +192,8 @@ function App() {
       setSearchResults(songSearchHistory[validSongs[nextIndex]])
       setCurrentStep('select')
     } else {
-      await validateLyrics(newSelectedUrls)
+      // All songs selected - use preloaded lyrics where available
+      await validateLyricsWithPreloaded(newSelectedUrls)
     }
   }
 
@@ -222,9 +268,57 @@ function App() {
         setManualInputSongName('')
         setManualLyricsText('')
         setError('')
+
+        // If in select step, advance to next song or proceed to extraction
+        if (currentStep === 'select') {
+          if (currentSongIndex < validSongs.length - 1) {
+            const nextIndex = currentSongIndex + 1
+            setCurrentSongIndex(nextIndex)
+            if (songSearchHistory[validSongs[nextIndex]]) {
+              setSearchResults(songSearchHistory[validSongs[nextIndex]])
+            }
+          } else {
+            // All songs done, proceed to review with what we have
+            // Need to extract lyrics for songs that have URLs selected
+            const songsWithUrls = selectedUrls.filter(s => s.url !== 'manual-input')
+            if (songsWithUrls.length > 0) {
+              await validateLyrics(songsWithUrls)
+            } else {
+              // All songs were manual, go to review
+              setCurrentStep('review')
+            }
+          }
+        }
       }
     } catch (err) {
       setError(err.response?.data?.detail || 'Error processing manual lyrics')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSearchAllSites = async (songName) => {
+    setLoading(true)
+    setError('')
+    setLoadingMessage(`Searching all sites for "${songName}"...`)
+
+    try {
+      const response = await axios.post('/api/search-all', {
+        song_name: songName
+      })
+
+      if (response.data && response.data.length > 0) {
+        setSearchResults(response.data)
+        // Update cache with expanded results
+        setSongSearchHistory(prev => ({
+          ...prev,
+          [songName]: response.data
+        }))
+      } else {
+        setError('No additional results found. Try entering lyrics manually.')
+      }
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Error searching all sites')
     } finally {
       setLoading(false)
     }
@@ -307,6 +401,68 @@ function App() {
     }
   }
 
+  // Optimized validation that uses preloaded lyrics
+  const validateLyricsWithPreloaded = async (songUrls) => {
+    setLoading(true)
+    setError('')
+    setLoadingMessage('Finalizing lyrics extraction...')
+
+    try {
+      const results = []
+      const urlsToFetch = []
+      const urlsToFetchIndices = []
+
+      // Check which URLs already have preloaded lyrics
+      songUrls.forEach((item, index) => {
+        if (item.url === 'manual-input') {
+          // Skip manual inputs - they're already in extractedSongs
+          const existing = extractedSongs.find(s => s.songName === item.song)
+          if (existing) {
+            results[index] = existing
+          }
+        } else if (preloadedLyrics[item.url]) {
+          // Use preloaded lyrics
+          results[index] = preloadedLyrics[item.url]
+        } else {
+          // Need to fetch this one
+          urlsToFetch.push(item.url)
+          urlsToFetchIndices.push({ index, song: item.song, url: item.url })
+        }
+      })
+
+      // Fetch any URLs that weren't preloaded
+      if (urlsToFetch.length > 0) {
+        setLoadingMessage(`Extracting ${urlsToFetch.length} remaining song${urlsToFetch.length > 1 ? 's' : ''}...`)
+
+        const response = await axios.post('/api/extract-lyrics', {
+          urls: urlsToFetch
+        })
+
+        // Merge fetched results
+        response.data.forEach((result, fetchIndex) => {
+          const { index, song, url } = urlsToFetchIndices[fetchIndex]
+          results[index] = {
+            ...result,
+            songName: song,
+            originalUrl: url
+          }
+        })
+      }
+
+      // Filter out undefined entries and set results
+      const finalResults = results.filter(r => r !== undefined)
+      setExtractedSongs(finalResults)
+      setCurrentStep('review')
+
+      // Clear preloaded cache
+      setPreloadedLyrics({})
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Error validating lyrics')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleGenerate = async () => {
     setLoading(true)
     setError('')
@@ -349,6 +505,8 @@ function App() {
       setLinesPerSlide(4)
       setExtractedSongs([])
       setSongSearchHistory({})
+      setPreloadedLyrics({})
+      setPreloadingUrls(new Set())
     } catch (err) {
       setError(err.response?.data?.detail || 'Error generating presentation')
     } finally {
@@ -439,6 +597,16 @@ function App() {
                   <h2 className="text-2xl font-semibold text-gray-900 mt-3">
                     Select source for "{validSongs[currentSongIndex]}"
                   </h2>
+                  {/* Preloading indicator */}
+                  {(preloadingUrls.size > 0 || Object.keys(preloadedLyrics).length > 0) && (
+                    <p className="text-sm text-green-600 mt-2 flex items-center justify-center gap-2">
+                      <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                      {preloadingUrls.size > 0
+                        ? `Extracting lyrics in background (${Object.keys(preloadedLyrics).length} ready)...`
+                        : `${Object.keys(preloadedLyrics).length} song${Object.keys(preloadedLyrics).length !== 1 ? 's' : ''} ready`
+                      }
+                    </p>
+                  )}
                 </div>
 
                 <StaggeredList className="space-y-3">
@@ -456,12 +624,41 @@ function App() {
                   ))}
                 </StaggeredList>
 
+                {/* Alternative options when search results aren't good enough */}
+                <div className="mt-6 pt-4 border-t border-gray-200">
+                  <p className="text-gray-500 text-sm mb-3">Not finding what you need?</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="secondary"
+                      onClick={() => handleSearchAllSites(validSongs[currentSongIndex])}
+                      disabled={loading}
+                    >
+                      Search All Sites
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => handleManualInput(validSongs[currentSongIndex])}
+                      disabled={loading}
+                    >
+                      Enter Manually
+                    </Button>
+                  </div>
+                </div>
+
                 <div className="mt-6">
                   <Button
                     variant="secondary"
                     onClick={() => {
                       setError('')
-                      setCurrentStep('input')
+                      if (currentSongIndex > 0) {
+                        // Go to previous song
+                        const prevIndex = currentSongIndex - 1
+                        setCurrentSongIndex(prevIndex)
+                        setSearchResults(songSearchHistory[validSongs[prevIndex]] || [])
+                      } else {
+                        // At first song, go back to input
+                        setCurrentStep('input')
+                      }
                     }}
                     disabled={loading}
                   >
@@ -508,10 +705,32 @@ function App() {
                             </h3>
 
                             {song.success ? (
-                              <p className="text-green-700 font-medium flex items-center gap-2">
-                                <CheckCircle size={16} />
-                                Lyrics extracted successfully
-                              </p>
+                              <div>
+                                <p className="text-green-700 font-medium flex items-center gap-2 mb-3">
+                                  <CheckCircle size={16} />
+                                  Lyrics extracted successfully
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => {
+                                      setManualInputSongName(song.songName)
+                                      setManualLyricsText(song.lyrics || '')
+                                      setShowManualInput(true)
+                                    }}
+                                  >
+                                    Edit Lyrics
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => handleReselect(song.songName)}
+                                  >
+                                    Try Different Source
+                                  </Button>
+                                </div>
+                              </div>
                             ) : (
                               <div>
                                 <p className="text-red-700 mb-4">{song.error || 'No lyrics found'}</p>
