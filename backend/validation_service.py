@@ -66,7 +66,7 @@ IMPORTANT:
                 "Content-Type": "application/json"
             },
             json={
-                "model": "grok-4-fast-non-reasoning",
+                "model": "grok-4-1-fast-non-reasoning",
                 "messages": [
                     {"role": "system", "content": "You are a search result validator. Return only valid JSON."},
                     {"role": "user", "content": validation_prompt}
@@ -164,7 +164,7 @@ Return JSON:
                 "Content-Type": "application/json"
             },
             json={
-                "model": "grok-4-fast-non-reasoning",
+                "model": "grok-4-1-fast-non-reasoning",
                 "messages": [
                     {"role": "system", "content": "Return only valid JSON."},
                     {"role": "user", "content": validation_prompt}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 import { AnimatePresence } from 'framer-motion'
-import { Music, Search, CheckCircle, Settings, Sparkles, AlertCircle } from 'lucide-react'
+import { Music, Search, CheckCircle, Sparkles, AlertCircle } from 'lucide-react'
 
 // Components
 import { Button } from './components/ui/Button'
@@ -53,7 +53,6 @@ function App() {
   const [songs, setSongs] = useState([''])
   const [currentStep, setCurrentStep] = useState('input')
   const [searchResults, setSearchResults] = useState([])
-  const [linesPerSlide, setLinesPerSlide] = useState(4)
   const [loading, setLoading] = useState(false)
   const [loadingMessage, setLoadingMessage] = useState('')
   const [error, setError] = useState('')
@@ -478,7 +477,6 @@ function App() {
     try {
       const response = await axios.post('/api/generate', {
         urls: successfulSongs.map(s => s.originalUrl),
-        lines_per_slide: linesPerSlide,
         validated_songs: successfulSongs.map(s => ({
           title: s.title,
           lyrics: s.lyrics
@@ -779,10 +777,12 @@ function App() {
                   {extractedSongs.some(s => s.success) && (
                     <Button
                       className="flex-1"
-                      onClick={() => setCurrentStep('configure')}
+                      onClick={handleGenerate}
+                      disabled={loading}
                     >
-                      Continue with {extractedSongs.filter(s => s.success).length} Song
-                      {extractedSongs.filter(s => s.success).length !== 1 ? 's' : ''}
+                      <Sparkles size={20} />
+                      Generate Presentation ({extractedSongs.filter(s => s.success).length} Song
+                      {extractedSongs.filter(s => s.success).length !== 1 ? 's' : ''})
                     </Button>
                   )}
                 </div>
@@ -829,56 +829,6 @@ function App() {
               </div>
             )}
 
-            {/* CONFIGURE STEP */}
-            {currentStep === 'configure' && (
-              <div>
-                <div className="text-center mb-8">
-                  <Settings className="mx-auto text-blue-500 mb-3" size={48} />
-                  <h2 className="text-2xl font-semibold text-gray-900">
-                    Configure Your Presentation
-                  </h2>
-                </div>
-
-                <FadeIn delay={0.2}>
-                  <Card hover={false} className="mb-8">
-                    <label className="block">
-                      <span className="text-gray-700 font-semibold mb-3 block">
-                        Lines per slide:
-                      </span>
-                      <Input
-                        type="number"
-                        min="1"
-                        max="20"
-                        value={linesPerSlide}
-                        onChange={(e) => setLinesPerSlide(parseInt(e.target.value))}
-                        className="max-w-xs"
-                      />
-                      <p className="text-sm text-gray-500 mt-2">
-                        Recommended: 4 lines for optimal readability
-                      </p>
-                    </label>
-                  </Card>
-                </FadeIn>
-
-                <div className="flex gap-3">
-                  <Button
-                    variant="secondary"
-                    onClick={() => setCurrentStep('review')}
-                  >
-                    Back
-                  </Button>
-
-                  <Button
-                    className="flex-1"
-                    onClick={handleGenerate}
-                    disabled={loading}
-                  >
-                    <Sparkles size={20} />
-                    Generate Presentation
-                  </Button>
-                </div>
-              </div>
-            )}
           </PageTransition>
         </div>
       </FadeIn>

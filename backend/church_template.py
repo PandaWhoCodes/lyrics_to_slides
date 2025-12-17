@@ -27,6 +27,153 @@ def insert_blank_separator(prs, separator_template):
     return new_slide
 
 
+def condense_repeated_lines(slide_text):
+    """
+    Condense consecutive repeated content within a slide.
+    Handles both:
+    1. Single lines repeated (e.g., "Hallelujah" x4)
+    2. Multi-line blocks repeated (e.g., a 4-line verse repeated twice)
+
+    Example 1 (single line):
+    Input:
+        Enthan Yesuvae
+        Enthan Yesuvae
+        Enthan Yesuvae
+        Enthan Yesuvae
+    Output:
+        Enthan Yesuvae (x4)
+
+    Example 2 (block):
+    Input:
+        Line A
+        Line B
+        Line A
+        Line B
+    Output:
+        Line A
+        Line B
+        (x2)
+    """
+    if not slide_text:
+        return slide_text
+
+    lines = [line for line in slide_text.split('\n') if line.strip()]
+    if len(lines) <= 2:
+        return slide_text
+
+    # First, try to detect repeated blocks
+    condensed = try_condense_blocks(lines)
+    if condensed:
+        return condensed
+
+    # Fall back to single-line repetition detection
+    return condense_single_lines(lines)
+
+
+def try_condense_blocks(lines):
+    """
+    Detect repeating blocks within the slide and condense them.
+    Can handle partial repetitions (block repeats but other content follows).
+    Returns condensed text if any repeating blocks found, None otherwise.
+    """
+    n = len(lines)
+    result_parts = []
+    i = 0
+
+    while i < n:
+        # Try to find a repeating block starting at position i
+        found_block = False
+
+        # Try different block sizes (prefer larger blocks, but include single lines)
+        for block_size in range(min((n - i) // 2, 10), 0, -1):
+            remaining = n - i
+            if remaining < block_size * 2:
+                continue
+
+            # Get the potential block
+            block = [line.strip().lower() for line in lines[i:i + block_size]]
+
+            # Count how many times this block repeats consecutively
+            repeat_count = 1
+            pos = i + block_size
+
+            while pos + block_size <= n:
+                next_block = [line.strip().lower() for line in lines[pos:pos + block_size]]
+                if next_block == block:
+                    repeat_count += 1
+                    pos += block_size
+                else:
+                    break
+
+            # If block repeats at least twice, condense it
+            if repeat_count >= 2:
+                original_block = lines[i:i + block_size]
+
+                # Check if all lines in the block are identical
+                # If so, prefer single-line format even if block_size > 1
+                block_lines_normalized = [line.strip().lower() for line in original_block]
+                all_identical = len(set(block_lines_normalized)) == 1
+
+                if block_size == 1 or all_identical:
+                    # Use inline format: "Line (xN)"
+                    total_repeats = block_size * repeat_count
+                    result_parts.append(f"{original_block[0]} (x{total_repeats})")
+                    print(f"    🔄 Condensed '{original_block[0][:30]}...' repeated {total_repeats} times → (x{total_repeats})")
+                else:
+                    # For multi-line blocks with different lines, put (xN) on its own line
+                    result_parts.append('\n'.join(original_block) + f'\n(x{repeat_count})')
+                    print(f"    🔄 Condensed {block_size}-line block repeated {repeat_count} times → (x{repeat_count})")
+                i = pos
+                found_block = True
+                break
+
+        if not found_block:
+            # No repeating block found at this position, keep the line as-is
+            result_parts.append(lines[i])
+            i += 1
+
+    # Check if any condensing happened
+    if any('(x' in part for part in result_parts):
+        return '\n'.join(result_parts)
+
+    return None
+
+
+def condense_single_lines(lines):
+    """
+    Condense consecutive identical single lines.
+    """
+    condensed_lines = []
+    i = 0
+
+    while i < len(lines):
+        current_line = lines[i].strip()
+        if not current_line:
+            condensed_lines.append(lines[i])
+            i += 1
+            continue
+
+        # Count consecutive repetitions
+        count = 1
+        j = i + 1
+        while j < len(lines) and lines[j].strip().lower() == current_line.lower():
+            count += 1
+            j += 1
+
+        # If repeated more than twice, condense it
+        if count > 2:
+            condensed_lines.append(f"{current_line} (x{count})")
+            print(f"    🔄 Condensed '{current_line[:30]}...' repeated {count} times → (x{count})")
+        else:
+            # Keep original lines (1 or 2 repetitions)
+            for k in range(count):
+                condensed_lines.append(lines[i + k])
+
+        i = j
+
+    return '\n'.join(condensed_lines)
+
+
 def deduplicate_slides(slide_texts):
     """
     Smart deduplication of slide content.
@@ -58,12 +205,13 @@ def deduplicate_slides(slide_texts):
     return deduplicated
 
 
-def create_church_presentation_v3(lyrics_list, song_names, lines_per_slide=4):
+def create_church_presentation_v3(lyrics_list, song_names):
     """
     Create a church-styled presentation by modifying template directly.
     This preserves all original formatting.
 
     Smart features:
+    - Respects ---SLIDE--- markers set by user/AI for slide breaks
     - Deduplicates consecutive identical slides (chorus repeated back-to-back)
     - Keeps the flow natural for worship leaders
     """
@@ -129,7 +277,7 @@ def create_church_presentation_v3(lyrics_list, song_names, lines_per_slide=4):
         # Split by ---SLIDE--- marker to get pre-grouped sections
         sections = lyrics.split('---SLIDE---')
 
-        # Build slide texts from sections
+        # Build slide texts from sections (respecting user/AI slide breaks)
         all_slide_texts = []
         for section in sections:
             # Clean section: remove ---TITLE---, ---LYRICS--- markers and empty lines
@@ -142,14 +290,8 @@ def create_church_presentation_v3(lyrics_list, song_names, lines_per_slide=4):
             if not section_lines:
                 continue
 
-            # If section has more lines than lines_per_slide, split it
-            if len(section_lines) > lines_per_slide:
-                for i in range(0, len(section_lines), lines_per_slide):
-                    chunk = section_lines[i:i + lines_per_slide]
-                    if chunk:
-                        all_slide_texts.append('\n'.join(chunk))
-            else:
-                all_slide_texts.append('\n'.join(section_lines))
+            # Each section becomes one slide (respecting ---SLIDE--- markers)
+            all_slide_texts.append('\n'.join(section_lines))
 
         # Smart deduplication - remove consecutive identical slides
         unique_slide_texts = deduplicate_slides(all_slide_texts)
@@ -159,6 +301,8 @@ def create_church_presentation_v3(lyrics_list, song_names, lines_per_slide=4):
         total_slides = len(unique_slide_texts)
 
         for slide_idx, slide_text in enumerate(unique_slide_texts):
+            # Condense repeated lines within this slide (e.g., "Hallelujah" x4 → "Hallelujah (x4)")
+            slide_text = condense_repeated_lines(slide_text)
 
             # Duplicate the lyrics template slide using its own layout
             # Use the same layout as the template to preserve structure
@@ -240,7 +384,7 @@ def create_church_presentation_v3(lyrics_list, song_names, lines_per_slide=4):
 
 
 if __name__ == "__main__":
-    # Test with repeated chorus to demonstrate deduplication
+    # Test with repeated chorus AND repeated lines within a slide
     test_lyrics = [
         """---TITLE---
 Amazing Grace
@@ -250,20 +394,20 @@ That saved a wretch like me
 I once was lost but now am found
 Was blind, but now I see
 ---SLIDE---
+Hallelujah
+Hallelujah
+Hallelujah
+Hallelujah
+---SLIDE---
 'Twas grace that taught my heart to fear
 And grace my fears relieved
 How precious did that grace appear
 The hour I first believed
 ---SLIDE---
-Amazing grace, how sweet the sound
-That saved a wretch like me
-I once was lost but now am found
-Was blind, but now I see
----SLIDE---
-Amazing grace, how sweet the sound
-That saved a wretch like me
-I once was lost but now am found
-Was blind, but now I see
+Enthan Yesuvae
+Enthan Yesuvae
+Enthan Yesuvae
+Enthan Yesuvae
 ---SLIDE---
 Through many dangers, toils and snares
 I have already come
@@ -272,9 +416,14 @@ And grace will lead me home"""
     ]
     test_songs = ["Amazing Grace"]
 
-    print("Testing smart deduplication...")
-    print("Input has 5 slides, with slides 1, 3, 4 being identical (chorus repeated)")
-    print("Expected output: 4 unique slides (consecutive duplicates removed)")
+    print("Testing smart deduplication and line condensing...")
+    print("Features being tested:")
+    print("  1. Consecutive duplicate slides are removed")
+    print("  2. Repeated lines within a slide (>2x) become 'Line (xN)'")
+    print()
+    print("Expected:")
+    print("  - 'Hallelujah' x4 → 'Hallelujah (x4)'")
+    print("  - 'Enthan Yesuvae' x4 → 'Enthan Yesuvae (x4)'")
     print()
 
-    create_church_presentation_v3(test_lyrics, test_songs, lines_per_slide=4)
+    create_church_presentation_v3(test_lyrics, test_songs)

@@ -92,7 +92,7 @@ def create_lyrics_slide(prs: Presentation, lyrics_chunk: List[str]):
     fill.solid()
     fill.fore_color.rgb = RGBColor(255, 255, 255)
 
-def create_presentation(all_lyrics: List[str], song_names: List[str], lines_per_slide: int, use_church_template: bool = True) -> str:
+def create_presentation(all_lyrics: List[str], song_names: List[str], use_church_template: bool = True) -> str:
     """
     Create a PowerPoint presentation from multiple songs' lyrics.
     Lyrics are already intelligently grouped by Grok with ---SLIDE--- separators.
@@ -100,7 +100,6 @@ def create_presentation(all_lyrics: List[str], song_names: List[str], lines_per_
     Args:
         all_lyrics: List of lyrics for each song
         song_names: List of song titles
-        lines_per_slide: Lines per slide (used for church template)
         use_church_template: If True, use church style (black bg, white text); if False, use default style
     """
 
@@ -108,7 +107,7 @@ def create_presentation(all_lyrics: List[str], song_names: List[str], lines_per_
     if use_church_template:
         try:
             from church_template import create_church_presentation_v3
-            return create_church_presentation_v3(all_lyrics, song_names, lines_per_slide)
+            return create_church_presentation_v3(all_lyrics, song_names)
         except ImportError:
             print("Church template not available, using default template")
             # Fall through to default template

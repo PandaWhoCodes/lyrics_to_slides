@@ -14,6 +14,7 @@ load_dotenv()
 from search_service import search_lyrics, search_all_sites
 from lyrics_service import extract_lyrics
 from pptx_service import create_presentation
+from church_template import condense_repeated_lines
 
 app = FastAPI()
 
@@ -48,7 +49,6 @@ class BatchSearchResponse(BaseModel):
 
 class GenerateRequest(BaseModel):
     urls: List[str]
-    lines_per_slide: int
     # Optional: pre-extracted lyrics from validation step
     validated_songs: Optional[List[dict]] = None
 
@@ -129,6 +129,28 @@ async def search_all(request: SearchRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+def condense_lyrics_sections(lyrics: str) -> str:
+    """
+    Apply line condensing to each slide section in the lyrics.
+    Repeated lines (>2x) become 'Line (xN)' format.
+    """
+    if not lyrics:
+        return lyrics
+
+    # Split by slide markers
+    sections = lyrics.split('---SLIDE---')
+    condensed_sections = []
+
+    for section in sections:
+        # Condense repeated lines within this section
+        condensed = condense_repeated_lines(section)
+        # Strip leading/trailing whitespace from each section
+        condensed_sections.append(condensed.strip() if condensed else '')
+
+    # Join with newlines around the slide marker for proper formatting
+    return '\n---SLIDE---\n'.join(condensed_sections)
+
+
 async def extract_single_url(url: str) -> LyricsExtractionResult:
     """Extract lyrics from a single URL"""
     try:
@@ -147,6 +169,9 @@ async def extract_single_url(url: str) -> LyricsExtractionResult:
 
         # Check if we got valid lyrics
         if lyrics and len(lyrics) > 50:
+            # Condense repeated lines in each slide section
+            lyrics = condense_lyrics_sections(lyrics)
+
             return LyricsExtractionResult(
                 url=url,
                 success=True,
@@ -214,7 +239,7 @@ async def generate_presentation(request: GenerateRequest, background_tasks: Back
             raise HTTPException(status_code=400, detail="No valid lyrics found for any songs")
 
         # Generate PPTX with all songs
-        filename = create_presentation(all_lyrics, song_names, request.lines_per_slide)
+        filename = create_presentation(all_lyrics, song_names)
 
         # Add background task to delete file after sending
         background_tasks.add_task(cleanup_file, filename)
@@ -309,7 +334,7 @@ Lyrics to clean:
                 "Content-Type": "application/json"
             },
             json={
-                "model": "grok-4-fast-non-reasoning",
+                "model": "grok-4-1-fast-non-reasoning",
                 "messages": [
                     {"role": "system", "content": "You are a lyrics cleaner. Return only cleaned lyrics with ---SLIDE--- markers."},
                     {"role": "user", "content": clean_prompt}
@@ -345,6 +370,9 @@ async def process_manual_lyrics(request: ManualLyricsRequest):
             cleaned_lyrics = await clean_manual_lyrics(request.lyrics)
         else:
             cleaned_lyrics = request.lyrics
+
+        # Condense repeated lines (>2x) in each slide section
+        cleaned_lyrics = condense_lyrics_sections(cleaned_lyrics)
 
         # Split into slide groups if markers are present
         slide_groups = None
